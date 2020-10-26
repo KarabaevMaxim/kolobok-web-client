@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Mime;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Shared.Dto;
@@ -15,35 +16,19 @@ namespace KolobokClient
   {
     private readonly HttpClient _client;
     
-    public async Task<TResponse?> Post<TData, TResponse>(TData data, Uri uri, string? token = null) 
-      where TData : IDto
-      where TResponse : ServerResponse
+    public async Task<TResponse?> Post<TData, TResponse>(TData data, Uri uri, string? accessToken, CancellationToken cancellationToken) where TResponse : ServerResponse
     {
+      SetAuthorizationHeaderIfNeeded(accessToken);
       var serialized = JsonConvert.SerializeObject(data);
-      
-      if (token != null)
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-      
-      var result = await _client.PostAsync(uri, new StringContent(serialized, Encoding.Default, MediaTypeNames.Application.Json));
+      var result = await _client.PostAsync(uri, new StringContent(serialized, Encoding.Default, MediaTypeNames.Application.Json), cancellationToken);
+      return await HandleResponse<TResponse>(result, uri);
+    }
 
-      if (result.IsSuccessStatusCode || result.StatusCode == HttpStatusCode.BadRequest)
-        return JsonConvert.DeserializeObject<TResponse>(await result.Content.ReadAsStringAsync());
-
-      if (result.StatusCode == HttpStatusCode.NotFound)
-      {
-        var content = await result.Content.ReadAsStringAsync();
-
-        if (content == null)
-        {
-          Console.WriteLine($"ERROR | Указанный {uri} не найден");
-          return default;
-        }
-        
-        return JsonConvert.DeserializeObject<TResponse>(content);
-      }
-      
-      Console.WriteLine($"ERROR | Ошибка {result.StatusCode}. {result.ReasonPhrase}");
-      return default;
+    public async Task<TResponse?> Get<TResponse>(Uri uri, string? accessToken, CancellationToken cancellationToken) where TResponse : ServerResponse
+    {
+      SetAuthorizationHeaderIfNeeded(accessToken);
+      var result = await _client.GetAsync(uri, cancellationToken);
+      return await HandleResponse<TResponse>(result, uri);
     }
     
     public Uri ConstructUri(bool useHttps, string host, int port, string apiPath, string controller, string method, Dictionary<string, string>? query = null)
@@ -78,6 +63,42 @@ namespace KolobokClient
     public void Dispose()
     {
       _client.Dispose();
+    }
+
+    private void SetAuthorizationHeaderIfNeeded(string? token)
+    {
+      if (string.IsNullOrEmpty(token))
+        return;
+      
+      _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+
+    private async Task<TResponse?> HandleResponse<TResponse>(HttpResponseMessage? response, Uri uri) where TResponse : ServerResponse
+    {
+      if (response == null)
+      {
+        Console.WriteLine($"ERROR | Ответ не получен");
+        return default;
+      }
+        
+      if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.BadRequest)
+        return JsonConvert.DeserializeObject<TResponse>(await response.Content.ReadAsStringAsync());
+      
+      if (response.StatusCode == HttpStatusCode.NotFound)
+      {
+        var content = await response.Content.ReadAsStringAsync();
+
+        if (content == null)
+        {
+          Console.WriteLine($"ERROR | Указанный {uri} не найден");
+          return default;
+        }
+        
+        return JsonConvert.DeserializeObject<TResponse>(content);
+      }
+      
+      Console.WriteLine($"ERROR | Ошибка {response.StatusCode}. {response.ReasonPhrase}");
+      return default;
     }
 
     public WebClient()
