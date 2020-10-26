@@ -6,7 +6,7 @@ namespace KolobokClient
       
     public static string Host => "localhost";
 
-    public static int Port => 4000;
+    public static int Port => 5001;
     
     public static string ApiPath => "api/v1";
   }
